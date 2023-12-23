@@ -1,4 +1,4 @@
-package scan
+package tcp
 
 import (
 	"fmt"
@@ -17,18 +17,15 @@ var HostsSpec string
 var PortsSpec string
 var Workers int
 var Timeout int
+var Scanners int
 
-var ports chan int
 var portsList []int
-
-var hosts []string
-var currentHost string
+var hostsList []string
+var bar *progressbar.ProgressBar
 
 var mu sync.Mutex
-var wg sync.WaitGroup
-var scanMap = map[int]string{}
-
-var bar *progressbar.ProgressBar
+var hwg sync.WaitGroup
+var scanMap = map[string]string{}
 
 func initPorts() {
 	csv := strings.Split(PortsSpec, ",")
@@ -77,21 +74,24 @@ func initCidrTarget() {
 	if err != nil {
 		panic(err)
 	}
-	hosts = h
+	hostsList = h
+	if len(h) < Scanners {
+		Scanners = len(hostsList)
+	}
 }
 
-func tcpWorker() {
+func tcpWorker(host string, ports chan int, wg *sync.WaitGroup) {
 	for i := range ports {
 		p := strconv.Itoa(i)
 		time.Sleep(time.Duration(rand.Intn(Timeout/4)) * time.Millisecond)
-		c, err := net.DialTimeout("tcp", currentHost+":"+p, time.Duration(Timeout*int(time.Millisecond)))
+		c, err := net.DialTimeout("tcp", host+":"+p, time.Duration(Timeout*int(time.Millisecond)))
 		if err != nil {
 			bar.Add(1)
 			wg.Done()
 			continue
 		}
 
-		srvName := "UNKNOWN"
+		srvName := "unknown"
 		srv := netdb.ServiceByPort(i, "tcp")
 		if srv != nil {
 			srvName = srv.Name
@@ -99,7 +99,7 @@ func tcpWorker() {
 
 		s := fmt.Sprintf("%-10s %-10s %-20s", p+"/tcp", "open", srvName)
 		mu.Lock()
-		scanMap[i] = s
+		scanMap[fmt.Sprintf("%s:%s", host, p)] = s
 		mu.Unlock()
 
 		c.Close()
@@ -108,40 +108,51 @@ func tcpWorker() {
 	}
 }
 
+func TcpScanHost(host string, limiter chan int) {
+	var wg sync.WaitGroup
+
+	ports := make(chan int, Workers)
+	for i := 0; i < Workers; i++ {
+		go tcpWorker(host, ports, &wg)
+	}
+
+	for _, p := range portsList {
+		wg.Add(1)
+		ports <- p
+	}
+	wg.Wait()
+	close(ports)
+	hwg.Done()
+	<-limiter
+
+}
+
 func TcpConnectScan() {
 
 	initPorts()
 	initCidrTarget()
 
-	ports = make(chan int, Workers)
-	for i := 0; i < Workers; i++ {
-		go tcpWorker()
+	bar = progressbar.Default(int64(len(portsList) * len(hostsList)))
+
+	scanChan := make(chan int, Scanners)
+
+	for _, h := range hostsList {
+		hwg.Add(1)
+		scanChan <- 1
+		go TcpScanHost(h, scanChan)
 	}
+	hwg.Wait()
 
-	for _, h := range hosts {
-
-		currentHost = h
-		bar = progressbar.Default(int64(len(portsList)))
-		for _, p := range portsList {
-			wg.Add(1)
-			ports <- p
-		}
-
-		wg.Wait()
-		//close(ports)
-		//ports = make(chan int, Workers)
-
-		fmt.Println("\nScan report for", currentHost)
+	for _, h := range hostsList {
+		fmt.Println("\nScan report for", h)
 		fmt.Printf("%-10s %-10s %-10s\n", "PORT", "STATE", "SERVICE")
-		for i := 1; i <= 65535; i++ {
-			v := scanMap[i]
+
+		for p := 1; p <= 65535; p++ {
+			v := scanMap[fmt.Sprintf("%s:%d", h, p)]
 			if v != "" {
 				fmt.Println(v)
 			}
 		}
-		scanMap = make(map[int]string)
-
 	}
-	close(ports)
 
 }

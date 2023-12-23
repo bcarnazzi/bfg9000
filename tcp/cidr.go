@@ -1,4 +1,4 @@
-package scan
+package tcp
 
 import "net"
 
@@ -13,6 +13,9 @@ func Hosts(cidr string) ([]string, error) {
 		ips = append(ips, ip.String())
 	}
 	// remove network address and broadcast address
+	if len(ips) == 1 {
+		return ips, nil
+	}
 	return ips[1 : len(ips)-1], nil
 }
 
