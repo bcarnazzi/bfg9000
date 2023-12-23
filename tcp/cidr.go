@@ -1,3 +1,6 @@
+/*
+Copyright © 2023 Bruno Carnazzi <bcarnazzi@gmail.com>
+*/
 package tcp
 
 import "net"
