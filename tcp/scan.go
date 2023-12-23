@@ -144,13 +144,23 @@ func TcpConnectScan() {
 	hwg.Wait()
 
 	for _, h := range hostsList {
-		fmt.Println("\nScan report for", h)
-		fmt.Printf("%-10s %-10s %-10s\n", "PORT", "STATE", "SERVICE")
+		var hs strings.Builder
+		var up = false
+		fmt.Fprintln(&hs, "\nScan report for", h)
+		fmt.Fprintf(&hs, "%-10s %-10s %-10s\n", "PORT", "STATE", "SERVICE")
 
 		for p := 1; p <= 65535; p++ {
 			v := scanMap[fmt.Sprintf("%s:%d", h, p)]
 			if v != "" {
-				fmt.Println(v)
+				up = true
+				fmt.Fprintln(&hs, v)
+			}
+		}
+		if up {
+			fmt.Print(hs.String())
+			fqdn, err := net.LookupAddr(h)
+			if err == nil {
+				fmt.Println("Hostname is", fqdn[0])
 			}
 		}
 	}
